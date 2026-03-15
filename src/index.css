@@ -1,84 +1,14 @@
 @import "tailwindcss";
 
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
 }
 
-::-webkit-scrollbar-track {
-  background: rgb(17 24 39);
+body {
+  margin: 0;
+  background: #f5f5f7;
 }
 
-::-webkit-scrollbar-thumb {
-  background: rgb(55 65 81);
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgb(75 85 99);
-}
-
-/* Firefox scrollbar */
 * {
-  scrollbar-width: thin;
-  scrollbar-color: rgb(55 65 81) rgb(17 24 39);
-}
-
-/* Animation for message appearance */
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.animate-fade-in-up {
-  animation: fadeInUp 0.3s ease-out forwards;
-}
-
-/* Prose styling for markdown content */
-.prose {
-  color: rgb(209 213 219);
-}
-
-.prose strong {
-  color: rgb(255 255 255);
-  font-weight: 600;
-}
-
-.prose code {
-  background: rgb(31 41 55);
-  padding: 0.125rem 0.375rem;
-  border-radius: 0.25rem;
-  font-size: 0.875em;
-  color: rgb(167 139 250);
-}
-
-.prose pre {
-  background: rgb(17 24 39);
-  border: 1px solid rgb(55 65 81);
-  border-radius: 0.5rem;
-  padding: 1rem;
-  overflow-x: auto;
-}
-
-.prose pre code {
-  background: transparent;
-  padding: 0;
-  color: rgb(209 213 219);
-}
-
-.prose hr {
-  border-color: rgb(55 65 81);
-  margin: 1rem 0;
-}
-
-.prose em {
-  color: rgb(156 163 175);
-  font-style: italic;
+  box-sizing: border-box;
 }
