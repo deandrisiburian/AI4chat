@@ -1,200 +1,205 @@
-import { useState, useEffect } from 'react';
-import { Sidebar } from './components/Sidebar';
-import { Header } from './components/Header';
-import { ChatMessage } from './components/ChatMessage';
-import { ChatInput } from './components/ChatInput';
-import { WelcomeScreen } from './components/WelcomeScreen';
-import { sendChatMessage, checkHealth, Message } from './api/chat';
-import { modelProviders } from './data/models';
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
-interface ChatMessageType {
+type ChatRole = "user" | "assistant";
+
+interface ChatItem {
   id: string;
-  role: 'user' | 'assistant';
+  role: ChatRole;
   content: string;
-  timestamp: Date;
-  model?: string;
 }
 
-function App() {
-  const [messages, setMessages] = useState<ChatMessageType[]>([]);
-  const [selectedModel, setSelectedModel] = useState('gpt-4o-mini');
-  const [isLoading, setIsLoading] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [, setError] = useState<string | null>(null);
-  const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'offline'>('checking');
+const quickPrompts = [
+  "Jelaskan AI dalam bahasa sederhana.",
+  "Buat ide konten Instagram tentang teknologi.",
+  "Tulis caption produk dengan gaya premium.",
+];
 
-  // Check server health on mount
+const ENDPOINT = "https://api.zenzxz.my.id/ai/chatgpt";
+
+const escapeHtml = (value: string) =>
+  value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+
+const renderMarkdown = (value: string) => {
+  let html = escapeHtml(value);
+
+  html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+  const lines = html.split("\n");
+  const output: string[] = [];
+  let inList = false;
+
+  for (const line of lines) {
+    const listMatch = line.match(/^[-*]\s+(.*)$/);
+
+    if (listMatch) {
+      if (!inList) {
+        output.push("<ul>");
+        inList = true;
+      }
+      output.push(`<li>${listMatch[1]}</li>`);
+      continue;
+    }
+
+    if (inList) {
+      output.push("</ul>");
+      inList = false;
+    }
+
+    if (line.trim().length === 0) {
+      output.push("<br />");
+      continue;
+    }
+
+    output.push(`<p>${line}</p>`);
+  }
+
+  if (inList) output.push("</ul>");
+  return output.join("");
+};
+
+export default function App() {
+  const [messages, setMessages] = useState<ChatItem[]>([]);
+  const [prompt, setPrompt] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const messageContainerRef = useRef<HTMLDivElement>(null);
+
+  const canSend = useMemo(() => prompt.trim().length > 0 && !loading, [prompt, loading]);
+
   useEffect(() => {
-    const checkServer = async () => {
-      const isHealthy = await checkHealth();
-      setServerStatus(isHealthy ? 'online' : 'offline');
-    };
-    checkServer();
-    
-    // Check every 30 seconds
-    const interval = setInterval(checkServer, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const getModelDisplayName = (modelId: string): string => {
-    for (const provider of modelProviders) {
-      const model = provider.models.find(m => m.id === modelId);
-      if (model) return model.name;
+    if (messageContainerRef.current) {
+      messageContainerRef.current.scrollTo({
+        top: messageContainerRef.current.scrollHeight,
+        behavior: "smooth",
+      });
     }
-    return modelId;
-  };
+  }, [messages, loading]);
 
-  const getProviderForModel = (modelId: string): string => {
-    for (const provider of modelProviders) {
-      const model = provider.models.find(m => m.id === modelId);
-      if (model) return provider.name;
-    }
-    return 'Unknown';
-  };
+  const askAI = async (text: string) => {
+    const cleanText = text.trim();
+    if (!cleanText || loading) return;
 
-  const handleSendMessage = async (content: string) => {
-    if (!content.trim() || isLoading) return;
-    
     setError(null);
-
-    const userMessage: ChatMessageType = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: content.trim(),
-      timestamp: new Date(),
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-    setIsLoading(true);
+    const userMsg: ChatItem = { id: `${Date.now()}-u`, role: "user", content: cleanText };
+    setMessages((prev) => [...prev, userMsg]);
+    setPrompt("");
+    setLoading(true);
 
     try {
-      // Build messages array for API
-      const apiMessages: Message[] = messages.map(m => ({
-        role: m.role,
-        content: m.content,
-      }));
-      apiMessages.push({ role: 'user', content: content.trim() });
+      const response = await fetch(`${ENDPOINT}?q=${encodeURIComponent(cleanText)}`);
+      if (!response.ok) {
+        throw new Error(`Request gagal (${response.status})`);
+      }
 
-      const response = await sendChatMessage(apiMessages, selectedModel);
+      const payload = await response.json();
+      const aiText =
+        payload?.result ?? payload?.data?.result ?? payload?.message ?? "Maaf, jawaban tidak tersedia.";
 
-      const assistantMessage: ChatMessageType = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: response.choices[0].message.content,
-        timestamp: new Date(),
-        model: selectedModel,
-      };
-
-      setMessages(prev => [...prev, assistantMessage]);
+      const aiMsg: ChatItem = { id: `${Date.now()}-a`, role: "assistant", content: String(aiText) };
+      setMessages((prev) => [...prev, aiMsg]);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'An error occurred';
-      setError(errorMessage);
-      
-      // Add error message to chat
-      const errorMsg: ChatMessageType = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: `❌ **Error:** ${errorMessage}\n\nPlease make sure the backend server is running:\n\`\`\`bash\nnode server/index.js\n\`\`\``,
-        timestamp: new Date(),
-        model: selectedModel,
+      const message = err instanceof Error ? err.message : "Terjadi kesalahan saat menghubungi API Zennz.";
+      setError(message);
+      const fallback: ChatItem = {
+        id: `${Date.now()}-e`,
+        role: "assistant",
+        content: `Maaf, terjadi kendala: ${message}`,
       };
-      setMessages(prev => [...prev, errorMsg]);
+      setMessages((prev) => [...prev, fallback]);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
-  const handleNewChat = () => {
-    setMessages([]);
-    setError(null);
-  };
-
-  const handleSelectPrompt = (prompt: string) => {
-    handleSendMessage(prompt);
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    askAI(prompt);
   };
 
   return (
-    <div className="flex h-screen bg-gray-900 text-white">
-      {/* Sidebar */}
-      <Sidebar
-        isOpen={sidebarOpen}
-        selectedModel={selectedModel}
-        onSelectModel={setSelectedModel}
-        onNewChat={handleNewChat}
-        onClose={() => setSidebarOpen(false)}
-      />
+    <div className="min-h-screen bg-[#f5f5f7] text-[#1d1d1f]">
+      <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 py-8 sm:px-8 sm:py-10">
+        <header className="mb-6 rounded-3xl border border-white/70 bg-white/75 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.08)] backdrop-blur-xl sm:p-8">
+          <p className="mb-3 inline-flex rounded-full bg-[#0071e3]/10 px-4 py-1 text-xs font-semibold tracking-wide text-[#0071e3]">
+            EpanD AI
+          </p>
+          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Asisten AI modern dengan rasa desain ala Apple</h1>
+          <p className="mt-3 max-w-2xl text-sm text-[#6e6e73] sm:text-base">
+            Kirim pertanyaan kamu, lalu EpanD AI akan menjawab melalui API Zennz secara real-time.
+          </p>
+        </header>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <Header
-          selectedModel={selectedModel}
-          modelName={getModelDisplayName(selectedModel)}
-          provider={getProviderForModel(selectedModel)}
-          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-          serverStatus={serverStatus}
-        />
-
-        {/* Chat Area */}
-        <div className="flex-1 overflow-y-auto">
-          {messages.length === 0 ? (
-            <WelcomeScreen 
-              onSelectModel={setSelectedModel}
-              onSelectPrompt={handleSelectPrompt}
-            />
-          ) : (
-            <div className="max-w-4xl mx-auto py-6 px-4">
-              {messages.map((message) => (
-                <ChatMessage
-                  key={message.id}
-                  role={message.role}
-                  content={message.content}
-                  timestamp={message.timestamp}
-                  model={message.model}
-                  modelName={message.model ? getModelDisplayName(message.model) : undefined}
-                />
-              ))}
-              {isLoading && (
-                <div className="flex items-start gap-4 mb-6">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0">
-                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                    </svg>
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="font-medium text-purple-400">{getModelDisplayName(selectedModel)}</span>
-                      <span className="text-xs text-gray-500">typing...</span>
-                    </div>
-                    <div className="flex gap-1">
-                      <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                      <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                      <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Input Area */}
-        <ChatInput
-          onSendMessage={handleSendMessage}
-          isLoading={isLoading}
-          disabled={serverStatus === 'offline'}
-        />
-
-        {/* Server Status Warning */}
-        {serverStatus === 'offline' && (
-          <div className="bg-red-900/50 border-t border-red-700 px-4 py-3 text-center">
-            <p className="text-red-300 text-sm">
-              ⚠️ Backend server is offline. Run <code className="bg-red-800 px-2 py-0.5 rounded">node server/index.js</code> to start.
-            </p>
+        <section className="flex flex-1 flex-col rounded-3xl border border-white/80 bg-white/80 shadow-[0_20px_60px_rgba(0,0,0,0.08)] backdrop-blur-xl">
+          <div className="flex items-center justify-between border-b border-[#ececf0] px-5 py-4 sm:px-7">
+            <h2 className="text-sm font-medium text-[#6e6e73]">Percakapan</h2>
+            <span className="text-xs text-[#86868b]">Powered by Zennz API</span>
           </div>
-        )}
-      </div>
+
+          <div ref={messageContainerRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-5 sm:px-6">
+            {messages.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-[#d2d2d7] bg-[#fbfbfd] p-5">
+                <p className="mb-3 text-sm text-[#6e6e73]">Mulai dengan prompt cepat:</p>
+                <div className="flex flex-wrap gap-2">
+                  {quickPrompts.map((item) => (
+                    <button
+                      key={item}
+                      onClick={() => askAI(item)}
+                      className="rounded-full border border-[#d2d2d7] bg-white px-3 py-1.5 text-xs text-[#1d1d1f] transition hover:border-[#0071e3] hover:text-[#0071e3]"
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {messages.map((item) => (
+              <article key={item.id} className={`flex ${item.role === "user" ? "justify-end" : "justify-start"}`}>
+                {item.role === "user" ? (
+                  <div className="max-w-[85%] rounded-2xl bg-[#0071e3] px-4 py-3 text-sm leading-relaxed text-white shadow-sm sm:max-w-[75%]">
+                    {item.content}
+                  </div>
+                ) : (
+                  <div
+                    className="markdown-content w-full max-w-[95%] text-sm leading-relaxed text-[#1d1d1f] sm:max-w-[85%]"
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(item.content) }}
+                  />
+                )}
+              </article>
+            ))}
+
+            {loading && <p className="text-sm text-[#6e6e73]">EpanD AI sedang mengetik...</p>}
+          </div>
+
+          <form onSubmit={handleSubmit} className="border-t border-[#ececf0] p-4 sm:p-5">
+            <div className="flex gap-3 rounded-2xl border border-[#d2d2d7] bg-white p-2">
+              <input
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder="Tulis pertanyaan kamu..."
+                className="w-full bg-transparent px-3 py-2 text-sm outline-none placeholder:text-[#86868b]"
+              />
+              <button
+                type="submit"
+                disabled={!canSend}
+                className="rounded-xl bg-[#0071e3] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#0077ed] disabled:cursor-not-allowed disabled:bg-[#b7d9fa]"
+              >
+                Kirim
+              </button>
+            </div>
+            {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
+          </form>
+        </section>
+      </main>
     </div>
   );
 }
-
-export default App;
